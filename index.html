@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML Model Runner</title>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+
+    <style>
+        /* --- General Styling --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 10px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+        h1 { text-align: center; color: #111; }
+        h2 { border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .hidden { display: none; }
+
+        /* --- Loader --- */
+        #loader {
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .loader-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #007bff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        #loader-text { font-size: 1.1rem; color: #555; margin-top: 15px; }
+        @keyframes spin { 
+            0% { transform: rotate(0deg); } 
+            100% { transform: rotate(360deg); } 
+        }
+
+        /* --- Tabs --- */
+        nav {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            background: #fdfdfd;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 16px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-size: 16px;
+            cursor: pointer;
+            color: #555;
+            transition: all 0.2s ease;
+        }
+        .tab-btn:hover { background: #f9f9f9; color: #000; }
+        .tab-btn.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+            font-weight: 600;
+        }
+
+        /* --- Content & Forms --- */
+        .task-content { padding: 25px; }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group-span-2 { grid-column: 1 / -1; }
+        
+        label { font-weight: 600; margin-bottom: 5px; }
+        .input-guide { font-size: 0.8rem; color: #666; margin-top: 3px; font-weight: 400; }
+        
+        input, select {
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 14px;
+            background: #fdfdfd;
+        }
+        input:focus, select:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.2);
+            outline: none;
+        }
+        
+        .predict-btn {
+            grid-column: 1 / -1;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background-color 0.2s ease;
+        }
+        .predict-btn:hover { background-color: #0056b3; }
+
+        /* --- Result Boxes --- */
+        .result-box {
+            margin-top: 20px;
+            padding: 15px 20px;
+            border-radius: 5px;
+            border-left-width: 5px;
+            border-left-style: solid;
+        }
+        .result-box h3 { margin-top: 0; }
+        
+        /* Specific result styles */
+        .result-box-bikes { background-color: #e6f7ff; border-color: #007bff; color: #0056b3; }
+        .result-box-diabetes-high { background-color: #ffe6e6; border-color: #d9534f; color: #a94442; }
+        .result-box-diabetes-low { background-color: #e6ffee; border-color: #5cb85c; color: #3c763d; }
+        .result-box-error { background-color: #fff0f0; border-color: #d9534f; color: #a94442; }
+
+    </style>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="loader-spinner"></div>
+        <p id="loader-text">Loading ONNX Runtime...</p>
+    </div>
+
+    <div id="app" class="container hidden">
+        <h1>Machine Learning Model Host</h1>
+
+        <nav>
+            <button id="tab-btn-bikes" class="tab-btn" onclick="showTask('bikes')">
+                Bike Rental Prediction
+            </button>
+            <button id="tab-btn-diabetes" class="tab-btn" onclick="showTask('diabetes')">
+                Diabetes Prediction
+            </button>
+        </nav>
+
+        <div id="task-bikes" class="task-content">
+            <h2>Seoul Bike Sharing Demand</h2>
+            <p>Enter the details below to predict the number of rented bikes.</p>
+            
+            <div class="form-grid">
+                <div class="form-group form-group-span-2">
+                    <label for="bike-model-select">Select Model</label>
+                    <select id="bike-model-select">
+                        <option value="">Loading models...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="hour">Hour <span class="input-guide">(0-23)</span></label>
+                    <input type="number" id="hour" value="12">
+                </div>
+                <div class="form-group">
+                    <label for="temp">Temperature (°C) <span class="input-guide">(-5.2 to 39.4)</span></label>
+                    <input type="number" step="0.1" id="temp" value="15.0">
+                </div>
+                <div class="form-group">
+                    <label for="humidity">Humidity (%) <span class="input-guide">(0-100)</span></label>
+                    <input type="number" id="humidity" value="50">
+                </div>
+                <div class="form-group">
+                    <label for="wind">Wind speed (m/s) <span class="input-guide">(0.0 to 7.4)</span></label>
+                    <input type="number" step="0.1" id="wind" value="1.5">
+                </div>
+                <div class="form-group">
+                    <label for="visibility">Visibility (10m) <span class="input-guide">(27 to 2000)</span></label>
+                    <input type="number" id="visibility" value="2000">
+                </div>
+                <div class="form-group">
+                    <label for="dew">Dew point temp (°C) <span class="input-guide">(-30.6 to 27.2)</span></label>
+                    <input type="number" step="0.1" id="dew" value="5.0">
+                </div>
+                <div class="form-group">
+                    <label for="radiation">Solar Radiation (MJ/m2) <span class="input-guide">(0.0 to 3.52)</span></label>
+                    <input type="number" step="0.1" id="radiation" value="0.5">
+                </div>
+                <div class="form-group">
+                    <label for="rain">Rainfall (mm) <span class="input-guide">(0.0 to 35.0)</span></label>
+                    <input type="number" step="0.1" id="rain" value="0.0">
+                </div>
+                <div class="form-group">
+                    <label for="snow">Snowfall (cm) <span class="input-guide">(0.0 to 8.8)</span></label>
+                    <input type="number" step="0.1" id="snow" value="0.0">
+                </div>
+                <div class="form-group">
+                    <label for="day">Day <span class="input-guide">(1-31)</span></label>
+                    <input type="number" id="day" value="15">
+                </div>
+                <div class="form-group">
+                    <label for="month">Month <span class="input-guide">(1-12)</span></label>
+                    <input type="number" id="month" value="6">
+                </div>
+                <div class="form-group">
+                    <label for="holiday">Is Holiday? <span class="input-guide">(Yes=1, No=0)</span></label>
+                    <select id="holiday">
+                        <option value="0">0 (No)</option>
+                        <option value="1">1 (Yes)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="functioning">Is Functioning Day? <span class="input-guide">(Yes=1, No=0)</span></label>
+                    <select id="functioning">
+                        <option value="1">1 (Yes)</option>
+                        <option value="0">0 (No)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="season_spring">Spring <span class="input-guide">(0 or 1)</span></label>
+                    <select id="season_spring"><option value="0">0</option><option value="1">1</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="season_summer">Summer <span class="input-guide">(0 or 1)</span></label>
+                    <select id="season_summer"><option value="1">1</option><option value="0">0</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="season_autumn">Autumn <span class="input-guide">(0 or 1)</span></label>
+                    <select id="season_autumn"><option value="0">0</option><option value="1">1</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="season_winter">Winter <span class="input-guide">(0 or 1)</span></label>
+                    <select id="season_winter"><option value="0">0</option><option value="1">1</option></select>
+                </div>
+
+                <button type="button" onclick="predictBikes()" class="predict-btn">
+                    Predict Bike Rentals
+                </button>
+            </div>
+
+            <div id="bike-result" class="result-box hidden">
+                <h3>Prediction Result</h3>
+                <p id="bike-result-text" style="font-size: 1.5rem; font-weight: bold;"></p>
+            </div>
+        </div>
+
+        <div id="task-diabetes" class="task-content hidden">
+            <h2>Pima Diabetes Prediction</h2>
+            <p>Enter the patient details below to predict the likelihood of diabetes.</p>
+            
+            <div class="form-grid">
+                <div class="form-group form-group-span-2">
+                    <label for="diabetes-model-select">Select Model</label>
+                    <select id="diabetes-model-select">
+                        <option value="">Loading models...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="pregnancies">Pregnancies <span class="input-guide">(0-17)</span></label>
+                    <input type="number" id="pregnancies" placeholder="e.g., 6" value="6">
+                </div>
+                <div class="form-group">
+                    <label for="glucose">Glucose <span class="input-guide">(44-199)</span></label>
+                    <input type="number" id="glucose" placeholder="e.g., 148" value="148">
+                </div>
+                <div class="form-group">
+                    <label for="bp">Blood Pressure <span class="input-guide">(24-122)</span></label>
+                    <input type="number" id="bp" placeholder="e.g., 72" value="72">
+                </div>
+                <div class="form-group">
+                    <label for="skin">Skin Thickness <span class="input-guide">(7-99)</span></label>
+                    <input type="number" id="skin" placeholder="e.g., 35" value="35">
+                </div>
+                <div class="form-group">
+                    <label for="insulin">Insulin <span class="input-guide">(14-846)</span></label>
+                    <input type="number" id="insulin" placeholder="e.g., 79" value="125">
+                </div>
+                <div class="form-group">
+                    <label for="bmi">BMI <span class="input-guide">(18.2-67.1)</span></label>
+                    <input type="number" step="0.1" id="bmi" placeholder="e.g., 33.6" value="33.6">
+                </div>
+                <div class="form-group">
+                    <label for="pedigree">Diabetes Pedigree <span class="input-guide">(0.08-2.42)</span></label>
+                    <input type="number" step="0.001" id="pedigree" placeholder="e.g., 0.627" value="0.627">
+                </div>
+                <div class="form-group">
+                    <label for="age">Age <span class="input-guide">(21-81)</span></label>
+                    <input type="number" id="age" placeholder="e.g., 50" value="50">
+                </div>
+
+                <button type="button" onclick="predictDiabetes()" class="predict-btn">
+                    Predict Diabetes Risk
+                </button>
+            </div>
+
+            <div id="diabetes-result" class="result-box hidden">
+                <h3>Prediction Result</h3>
+                <p id="diabetes-result-text" style="font-size: 1.5rem; font-weight: bold;"></p>
+                <p id="diabetes-result-prob" style="font-size: 1.1rem;"></p>
+            </div>
+        </div>
+    </div>
+
+    <script id="onnx-script" src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+
+    <script>
+        
+        // --- GLOBAL VARIABLES ---
+        
+        // Models that will be loaded from the folder
+        // We exclude XGBoost since it failed to export
+        const allBikeModelNames = [
+            'LinRegNet', 
+            'MLP_Net', 
+            'DL_Net', 
+            'LinearPlusNonLinear_Net'
+        ];
+        const allDiabetesModelNames = [
+            'DL_Net', 
+            'MLP_Net'
+        ];
+
+        // These will store the loaded model sessions
+        let bikeSessions = {};
+        let diabetesSessions = {};
+
+        // UI Elements
+        const loader = document.getElementById('loader');
+        const loaderText = document.getElementById('loader-text');
+        const app = document.getElementById('app');
+        
+        const bikeTab = document.getElementById('tab-btn-bikes');
+        const diabetesTab = document.getElementById('tab-btn-diabetes');
+        const bikeContent = document.getElementById('task-bikes');
+        const diabetesContent = document.getElementById('task-diabetes');
+        
+        const bikeModelSelect = document.getElementById('bike-model-select');
+        const diabetesModelSelect = document.getElementById('diabetes-model-select');
+        
+        const bikeResultDiv = document.getElementById('bike-result');
+        const bikeResultText = document.getElementById('bike-result-text');
+        
+        const diabetesResultDiv = document.getElementById('diabetes-result');
+        const diabetesResultText = document.getElementById('diabetes-result-text');
+        const diabetesResultProb = document.getElementById('diabetes-result-prob');
+
+
+        /**
+         * Populates the dropdown menus with *only* the models that loaded successfully
+         */
+        function populateDropdowns(bikeNames, diabetesNames) {
+            bikeModelSelect.innerHTML = ''; // Clear "Loading..."
+            diabetesModelSelect.innerHTML = ''; // Clear "Loading..."
+
+            if (bikeNames.length === 0) {
+                bikeModelSelect.innerHTML = '<option value="">No Bike models loaded (Check console)</option>';
+            } else {
+                bikeNames.forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.text = name;
+                    if (name === 'DL_Net') option.text += ' (Best PyTorch)';
+                    bikeModelSelect.appendChild(option);
+                });
+            }
+
+            if (diabetesNames.length === 0) {
+                diabetesModelSelect.innerHTML = '<option value="">No Diabetes models loaded (Check console)</option>';
+            } else {
+                diabetesNames.forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.text = name;
+                    if (name === 'DL_Net') option.text += ' (Best)';
+                    diabetesModelSelect.appendChild(option);
+                });
+            }
+        }
+
+
+        // --- APPLICATION LOGIC ---
+        
+        /**
+         * Loads all ONNX models when the app starts.
+         * Skips incompatible models and provides fallbacks.
+         */
+        async function initializeApp() {
+            try {
+                if (typeof ort === 'undefined') {
+                    throw new Error("ONNX Runtime (ort) is not loaded. Check the script tag.");
+                }
+                
+                // Point the runtime to the CDN to find its helper files (.wasm)
+                ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+                
+                const execProvider = 'wasm';
+                console.log("ONNX Runtime initialized. Starting model loading...");
+
+                // --- ROBUST MODEL LOADING ---
+                // We load each model in its own try/catch block.
+                // This prevents one bad model from crashing the entire app.
+                
+                const loadedBikeNames = [];
+                for (const name of allBikeModelNames) {
+                    const path = `${name}_BikeSharing.onnx`;
+                    loaderText.innerText = `Loading ${path}...`;
+                    console.log(`Attempting to load: ${path}`);
+                    try {
+                        bikeSessions[name] = await ort.InferenceSession.create(path, { executionProviders: [execProvider] });
+                        console.log(`✓ SUCCESS: Loaded bike model: ${name}`);
+                        loadedBikeNames.push(name);
+                    } catch (e) {
+                        console.warn(`Failed to load bike model: ${name}. Skipping. Error:`, e.message);
+                    }
+                }
+
+                const loadedDiabetesNames = [];
+                for (const name of allDiabetesModelNames) {
+                    const path = `${name}_Diabetes.onnx`;
+                    loaderText.innerText = `Loading ${path}...`;
+                    console.log(`Attempting to load: ${path}`);
+                    try {
+                        diabetesSessions[name] = await ort.InferenceSession.create(path, { executionProviders: [execProvider] });
+                        console.log(`✓ SUCCESS: Loaded diabetes model: ${name}`);
+                        loadedDiabetesNames.push(name);
+                    } catch (e) {
+                        console.warn(`Failed to load diabetes model: ${name}. Skipping. Error:`, e.message);
+                    }
+                }
+                
+                // Populate dropdowns with *only* the models that successfully loaded
+                populateDropdowns(loadedBikeNames, loadedDiabetesNames);
+
+                // ==========================================================
+                // THE FIX IS HERE:
+                // ==========================================================
+                // Hide loader and show app
+                loader.style.display = 'none'; // <-- FIX: Directly set display to none
+                app.classList.remove('hidden');
+                showTask('bikes'); // Show the first tab by default
+                // ==========================================================
+                
+                console.log("Model loading complete.");
+
+            } catch (error) {
+                console.error('A critical error occurred during initialization:', error);
+                loaderText.innerText = `Critical Error: ${error.message}. Please check console.`;
+                // Do not hide loader, as the app is broken
+            }
+        }
+
+        /**
+         * Switches the visible task
+         */
+        function showTask(taskName) {
+            if (taskName === 'bikes') {
+                bikeContent.classList.remove('hidden');
+                diabetesContent.classList.add('hidden');
+                bikeTab.classList.add('active');
+                diabetesTab.classList.remove('active');
+            } else {
+                bikeContent.classList.add('hidden');
+                diabetesContent.classList.remove('hidden');
+                bikeTab.classList.remove('active');
+                diabetesTab.classList.add('active');
+            }
+        }
+
+        /**
+         * Helper to show an error on a result box
+         */
+        function showResultError(resultDiv, resultText, error) {
+            console.error('Prediction error:', error);
+            resultText.innerText = `Error: ${error.message}`;
+            
+            // Apply generic error class
+            resultDiv.className = 'result-box result-box-error';
+            resultDiv.classList.remove('hidden');
+
+            // Clear any extra text (like probability)
+            if (resultDiv.id === 'diabetes-result') {
+                diabetesResultProb.innerText = '';
+            }
+        }
+
+        /**
+         * Gets bike form data as a Float32Array in the correct order
+         */
+        function getBikeFormData() {
+            // Order must match the 'feature_cols' in the Python script
+            const features = [
+                parseFloat(document.getElementById('hour').value),
+                parseFloat(document.getElementById('temp').value),
+                parseFloat(document.getElementById('humidity').value),
+                parseFloat(document.getElementById('wind').value),
+                parseFloat(document.getElementById('visibility').value),
+                parseFloat(document.getElementById('dew').value),
+                parseFloat(document.getElementById('radiation').value),
+                parseFloat(document.getElementById('rain').value),
+                parseFloat(document.getElementById('snow').value),
+                parseFloat(document.getElementById('day').value),
+                parseFloat(document.getElementById('month').value),
+                parseFloat(document.getElementById('season_spring').value),
+                parseFloat(document.getElementById('season_summer').value),
+                parseFloat(document.getElementById('season_autumn').value),
+                parseFloat(document.getElementById('season_winter').value),
+                parseFloat(document.getElementById('holiday').value),
+                parseFloat(document.getElementById('functioning').value)
+            ];
+            
+            if (features.some(isNaN)) {
+                throw new Error("Please fill in all fields with valid numbers.");
+            }
+            return new Float32Array(features);
+        }
+
+        /**
+         * Gets diabetes form data as a Float32Array in the correct order
+         */
+        function getDiabetesFormData() {
+            // Order must match the 'feature_cols' in the Python script
+            const features = [
+                parseFloat(document.getElementById('pregnancies').value),
+                parseFloat(document.getElementById('glucose').value),
+                parseFloat(document.getElementById('bp').value),
+                parseFloat(document.getElementById('skin').value),
+                parseFloat(document.getElementById('insulin').value),
+                parseFloat(document.getElementById('bmi').value),
+                parseFloat(document.getElementById('pedigree').value),
+                parseFloat(document.getElementById('age').value)
+            ];
+
+            if (features.some(isNaN)) {
+                throw new Error("Please fill in all fields with valid numbers.");
+            }
+            return new Float32Array(features);
+        }
+
+        /**
+         * Runs prediction for the Bike Rental task
+         */
+        async function predictBikes() {
+            try {
+                const modelName = bikeModelSelect.value;
+                if (!modelName) {
+                    throw new Error("No bike model selected or loaded.");
+                }
+                const session = bikeSessions[modelName];
+                if (!session) {
+                    throw new Error(`Model ${modelName} is not loaded or was incompatible.`);
+                }
+
+                // 1. Get Data and create tensor
+                const inputData = getBikeFormData();
+                const dims = [1, 17]; // Batch size 1, 17 features
+                const inputTensor = new ort.Tensor('float32', inputData, dims);
+                
+                // 2. Prepare feeds. Use standardized "input" name
+                const inputName = session.inputNames[0]; // Should be "input"
+                const feeds = { [inputName]: inputTensor };
+
+                // 3. Run model
+                const results = await session.run(feeds);
+                
+                // 4. Get output. Use standardized "output" name
+                const outputName = session.outputNames[0]; // Should be "output"
+                const output = results[outputName].data;
+
+                // 5. Display result
+                const predictedValue = output[0];
+                bikeResultText.innerText = `${Math.round(predictedValue)} bikes`;
+                bikeResultDiv.className = 'result-box result-box-bikes';
+                bikeResultDiv.classList.remove('hidden');
+
+            } catch (error) {
+                showResultError(bikeResultDiv, bikeResultText, error);
+            }
+        }
+
+        /**
+         * Runs prediction for the Diabetes task
+         */
+        async function predictDiabetes() {
+            try {
+                const modelName = diabetesModelSelect.value;
+                if (!modelName) {
+                    throw new Error("No diabetes model selected or loaded.");
+                }
+                const session = diabetesSessions[modelName];
+                if (!session) {
+                    throw new Error(`Model ${modelName} is not loaded or was incompatible.`);
+                }
+
+                // 1. Get Data and create tensor
+                const inputData = getDiabetesFormData();
+                const dims = [1, 8]; // Batch size 1, 8 features
+                const inputTensor = new ort.Tensor('float32', inputData, dims);
+                
+                // 2. Prepare feeds. Use standardized "input" name
+                const inputName = session.inputNames[0]; // Should be "input"
+                const feeds = { [inputName]: inputTensor };
+
+                // 3. Run model
+                const results = await session.run(feeds);
+                
+                // 4. Get output. Use standardized "output" name
+                const outputName = session.outputNames[0]; // Should be "output"
+                const output = results[outputName].data;
+
+                // 5. Display result
+                const probability = output[0];
+                const percentage = (probability * 100).toFixed(1);
+                const hasDiabetes = probability > 0.5;
+
+                if (hasDiabetes) {
+                    diabetesResultText.innerText = "High Risk of Diabetes";
+                    diabetesResultProb.innerText = `Probability: ${percentage}%`;
+                    diabetesResultDiv.className = 'result-box result-box-diabetes-high';
+                } else {
+                    diabetesResultText.innerText = "Low Risk of Diabetes";
+                    diabetesResultProb.innerText = `Probability: ${percentage}%`;
+                    diabetesResultDiv.className = 'result-box result-box-diabetes-low';
+                }
+                diabetesResultDiv.classList.remove('hidden');
+
+            } catch (error) {
+                showResultError(diabetesResultDiv, diabetesResultText, error);
+            }
+        }
+
+        // --- START THE APP ---
+        // This robust start function prevents the race condition
+        // where the script finishes loading before the .onload is attached.
+        
+        const onnxScript = document.getElementById('onnx-script');
+        let appInitialized = false;
+
+        function startApp() {
+            if (appInitialized) return;
+            appInitialized = true;
+            
+            console.log("ONNX Runtime is ready. Initializing app...");
+            loaderText.innerText = 'Loading models...';
+            initializeApp();
+        }
+
+        if (onnxScript) {
+            // 1. Handle the normal load event
+            onnxScript.onload = startApp;
+            
+            // 2. Handle errors
+            onnxScript.onerror = () => {
+                console.error("Failed to load the ONNX Runtime script. Check the CDN link.");
+                loaderText.innerText = 'CRITICAL ERROR: Failed to load ONNX Runtime. Please refresh.';
+            };
+            
+            // 3. Handle the race condition (if script is already in cache)
+            if (typeof ort !== 'undefined') {
+                console.warn("ONNX Runtime was already loaded (from cache?). Handling race condition.");
+                startApp();
+            }
+        } else {
+            console.error("Could not find the ONNX script tag.");
+            loaderText.innerText = 'CRITICAL ERROR: Script initialization failed.';
+        }
+
+    </script>
+</body>
+</html>
